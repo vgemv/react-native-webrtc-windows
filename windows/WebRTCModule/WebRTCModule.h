@@ -41,23 +41,28 @@ using winrt::Microsoft::ReactNative::JSValueArray;
 using winrt::Microsoft::ReactNative::JSValueType;
 using winrt::Microsoft::ReactNative::JSValueObject;
 
+#include "PeerConnectionObserver.h"
+
 namespace winrt::WebRTCModule
 {
+	class PeerConnectionObserver;
+
 	REACT_MODULE(WebRTCModule);
-	struct WebRTCModule
+	class WebRTCModule
 	{
 	private:
 		rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peer_connection_factory_;
 		std::map<int, rtc::scoped_refptr<PeerConnectionObserver>> pc_observers_;
 		std::map<std::string, rtc::scoped_refptr<webrtc::MediaStreamInterface>> local_streams_;
 		std::map<std::string, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> local_tracks_;
+		std::unique_ptr<rtc::Thread> worker_thread_;
 
 		rtc::scoped_refptr<webrtc::PeerConnectionInterface>(getPeerConnection)(int id) noexcept;
 	protected:
 		void sendEvent(std::string name, JSValue& params) noexcept;
 
 	public:
-
+		WebRTCModule();
 		REACT_METHOD(peerConnectionInit);
 		void(peerConnectionInit)(webrtc::PeerConnectionInterface::RTCConfiguration configuration, int id) noexcept;
 
@@ -65,11 +70,9 @@ namespace winrt::WebRTCModule
 		//void(getDisplayMedia)(React::ReactPromise< promise) noexcept;
 
 		REACT_METHOD(getUserMedia);
-		void(getUserMedia)(JSValueObject&& constraints,
+		void(getUserMedia)(JSValueObject constraints,
 			const std::function<void(std::string, JSValueArray&)> successCallback,
 			const std::function<void(std::string, std::string)> errorCallback) noexcept;
-
-		void(mediaStreamCreate)(std::string id) noexcept;
 
 		//REACT_METHOD(enumerateDevices);
 		//void(enumerateDevices)(const std::function<void(std::string, std::string)> callback) noexcept;
@@ -108,22 +111,22 @@ namespace winrt::WebRTCModule
 		REACT_METHOD(peerConnectionCreateOffer);
 		void(peerConnectionCreateOffer)(int id,
 			JSValueObject&& options,
-			const std::function<void(bool, JSValueObject&)>  callback) noexcept;
+			const std::function<void(bool, JSValue&)>  callback) noexcept;
 
 		REACT_METHOD(peerConnectionCreateAnswer);
 		void(peerConnectionCreateAnswer)(int id,
 			JSValueObject&& options,
-			const std::function<void(bool, JSValueObject&)>  callback) noexcept;
+			const std::function<void(bool, JSValue&)>  callback) noexcept;
 
 		REACT_METHOD(peerConnectionSetLocalDescription);
 		void(peerConnectionSetLocalDescription)(JSValueObject&& sdpMap,
 			int id,
-			const std::function<void(bool, JSValueObject&)> callback) noexcept;
+			const std::function<void(bool, JSValue&)> callback) noexcept;
 
 		REACT_METHOD(peerConnectionSetRemoteDescription);
 		void(peerConnectionSetRemoteDescription)(JSValueObject&& sdpMap,
 			int id,
-			const std::function<void(bool, JSValueObject&)> callback) noexcept;
+			const std::function<void(bool, JSValue&)> callback) noexcept;
 
 		REACT_METHOD(peerConnectionAddICECandidate);
 		void(peerConnectionAddICECandidate)(JSValueObject&& candidateMap,

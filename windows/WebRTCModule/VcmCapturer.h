@@ -12,6 +12,8 @@
 #include <memory>
 #include <vector>
 
+#define WEBRTC_WIN 1
+
 #include "api/scoped_refptr.h"
 #include "modules/video_capture/video_capture.h"
 #include "CameraVideoCapturer.h"

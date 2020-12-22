@@ -27,7 +27,7 @@ import {
 
 const App: () => React$Node = () => {
   NativeModules.WebRTCModule.getUserMedia(
-      {test:1},
+      {video:true,audio:true},
       (id, tracks)=>{console.log("success",id,tracks)},
       (type, msg)=>{console.log("error",type,msg)});
       
@@ -45,6 +45,7 @@ const App: () => React$Node = () => {
             </View>
           )}
           <View style={styles.body}>
+            
             <View style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>Step One</Text>
               <Text style={styles.sectionDescription}>

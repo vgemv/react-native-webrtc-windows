@@ -2,7 +2,7 @@
 #include "ReactPackageProvider.h"
 #include "NativeModules.h"
 
-#include "WebRTCModule.h" 
+//#include "WebRTCModule.h" 
 
 using namespace winrt::Microsoft::ReactNative;
 

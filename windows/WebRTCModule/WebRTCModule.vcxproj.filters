@@ -13,6 +13,7 @@
     <ClCompile Include="ReactPackageProvider.cpp" />
     <ClCompile Include="AutolinkedNativeModules.g.cpp" />
     <ClCompile Include="WebRTCModule.cpp" />
+    <ClCompile Include="PeerConnectionObserver.cpp" />
     <ClCompile Include="CameraVideoCapturer.cpp" />
     <ClCompile Include="VcmCapturer.cpp" />
   </ItemGroup>
@@ -21,8 +22,8 @@
     <ClInclude Include="App.h" />
     <ClInclude Include="ReactPackageProvider.h" />
     <ClInclude Include="AutolinkedNativeModules.g.h" />
-    <ClInclude Include="WebRTCModule.h" />
     <ClInclude Include="JSValueReader.h" />
+    <ClInclude Include="WebRTCModule.h" />
     <ClInclude Include="PeerConnectionObserver.h" />
     <ClInclude Include="CameraVideoCapturer.h" />
     <ClInclude Include="VcmCapturer.h" />

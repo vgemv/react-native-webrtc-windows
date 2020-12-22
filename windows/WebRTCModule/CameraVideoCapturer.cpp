@@ -13,6 +13,7 @@
 
 #include <algorithm>
 
+
 #include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
@@ -21,13 +22,13 @@
 namespace winrt::WebRTCModule {
 	CameraVideoCapturer::~CameraVideoCapturer() = default;
 
-	void CameraVideoCapturer::OnFrame(const webrtc::VideoFrame& original_frame) {
+	void CameraVideoCapturer::OnFrame(const webrtc::VideoFrame& frame) {
 		int cropped_width = 0;
 		int cropped_height = 0;
 		int out_width = 0;
 		int out_height = 0;
 
-		webrtc::VideoFrame frame = MaybePreprocess(original_frame);
+		//webrtc::VideoFrame frame = MaybePreprocess(original_frame);
 
 		if (!video_adapter_.AdaptFrameResolution(
 			frame.width(), frame.height(), frame.timestamp_us() * 1000,
@@ -49,12 +50,12 @@ namespace winrt::WebRTCModule {
 				.set_rotation(webrtc::kVideoRotation_0)
 				.set_timestamp_us(frame.timestamp_us())
 				.set_id(frame.id());
-			if (frame.has_update_rect()) {
-				webrtc::VideoFrame::UpdateRect new_rect = frame.update_rect().ScaleWithFrame(
-					frame.width(), frame.height(), 0, 0, frame.width(), frame.height(),
-					out_width, out_height);
-				new_frame_builder.set_update_rect(new_rect);
-			}
+			//if (frame.has_update_rect()) {
+			//	webrtc::VideoFrame::UpdateRect new_rect = frame.update_rect().ScaleWithFrame(
+			//		frame.width(), frame.height(), 0, 0, frame.width(), frame.height(),
+			//		out_width, out_height);
+			//	new_frame_builder.set_update_rect(new_rect);
+			//}
 			broadcaster_.OnFrame(new_frame_builder.build());
 
 		}
@@ -84,14 +85,14 @@ namespace winrt::WebRTCModule {
 		video_adapter_.OnSinkWants(broadcaster_.wants());
 	}
 
-	webrtc::VideoFrame CameraVideoCapturer::MaybePreprocess(const webrtc::VideoFrame& frame) {
-		webrtc::MutexLock lock(&lock_);
-		if (preprocessor_ != nullptr) {
-			return preprocessor_->Preprocess(frame);
-		}
-		else {
-			return frame;
-		}
-	}
+	//webrtc::VideoFrame CameraVideoCapturer::MaybePreprocess(const webrtc::VideoFrame& frame) {
+	//	webrtc::MutexLock lock(&lock_);
+	//	if (preprocessor_ != nullptr) {
+	//		return preprocessor_->Preprocess(frame);
+	//	}
+	//	else {
+	//		return frame;
+	//	}
+	//}
 
 }

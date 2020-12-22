@@ -1,13 +1,19 @@
 #include "pch.h"
 #include "WebRTCModule.h"
-#include "PeerConnectionObserver.h"
 #include "VcmCapturer.h"
-
+#include "PeerConnectionObserver.h"
 
 #include "pc/video_track_source.h"
 #include "modules/video_capture/video_capture_factory.h"
 
+#include <rtc_base/ssl_adapter.h>
+#include <rtc_base/task_utils/to_queued_task.h>
+#include <system_wrappers/include/field_trial.h>
+
 using winrt::Microsoft::ReactNative::JSValue;
+
+#include <future>
+// std::async performance https://stackoverflow.com/questions/14351352/does-asynclaunchasync-in-c11-make-thread-pools-obsolete-for-avoiding-expen
 
 namespace winrt::WebRTCModule
 {
@@ -15,7 +21,7 @@ namespace winrt::WebRTCModule
 	class CapturerTrackSource : public webrtc::VideoTrackSource {
 	public:
 		static rtc::scoped_refptr<CapturerTrackSource> Create() {
-			return Create("", 0, 0, 0);
+			return Create("", 640, 480, 25);
 		}
 		static rtc::scoped_refptr<CapturerTrackSource> Create(std::string device_id, size_t width, size_t height, size_t fps) {
 			std::unique_ptr<VcmCapturer> capturer;
@@ -72,11 +78,16 @@ namespace winrt::WebRTCModule
 	}
 
 
-	void(WebRTCModule::sendEvent)(std::string name, JSValue& params) noexcept {
-		
+	WebRTCModule::WebRTCModule() {
+		worker_thread_ = rtc::Thread::Create();
+		worker_thread_->Start();
 	}
 
-	void(WebRTCModule::peerConnectionInit)(webrtc::PeerConnectionInterface::RTCConfiguration configuration, int id) noexcept
+	void(WebRTCModule::sendEvent)(std::string name, JSValue& params) noexcept {
+
+	}
+
+	void(WebRTCModule::peerConnectionInit)(const webrtc::PeerConnectionInterface::RTCConfiguration configuration, int id) noexcept
 	{
 		if (!peer_connection_factory_) {
 			peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
@@ -98,7 +109,7 @@ namespace winrt::WebRTCModule
 			new rtc::RefCountedObject<PeerConnectionObserver>(this, id));
 
 		rtc::scoped_refptr<webrtc::PeerConnectionInterface> peer_connection = peer_connection_factory_->CreatePeerConnection(
-			configuration, nullptr, nullptr, observer.get());
+			configuration, nullptr, nullptr, (webrtc::PeerConnectionObserver*)observer.get());
 
 		observer->SetPeerConnection(peer_connection);
 		pc_observers_[id] = observer;
@@ -107,17 +118,39 @@ namespace winrt::WebRTCModule
 
 	//void(WebRTCModule::getDisplayMedia)(React::ReactPromise< promise) noexcept;
 
-	void(WebRTCModule::getUserMedia)(JSValueObject&& constraints,
+	void(WebRTCModule::getUserMedia)(JSValueObject constraints_,
 		const std::function<void(std::string, JSValueArray&)> success_callback,
 		const std::function<void(std::string, std::string)> error_callback) noexcept
 	{
+		worker_thread_->PostTask(webrtc::ToQueuedTask([=, constraints = constraints_.Copy()] (){
+		//std::thread{ [&, constraints = constraints_.Copy()] (){
+		if (!peer_connection_factory_) {
+			//rtc::LogMessage::SetLogToStderr(true);
+			//webrtc::field_trial::InitFieldTrialsFromString("");
+			//rtc::InitializeSSL();
+
+			peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
+				nullptr /* network_thread */, nullptr /* worker_thread */,
+				nullptr /* signaling_thread */, nullptr /* default_adm */,
+				webrtc::CreateBuiltinAudioEncoderFactory(),
+				webrtc::CreateBuiltinAudioDecoderFactory(),
+				webrtc::CreateBuiltinVideoEncoderFactory(),
+				webrtc::CreateBuiltinVideoDecoderFactory(), nullptr /* audio_mixer */,
+				nullptr /* audio_processing */);
+
+			if (!peer_connection_factory_) {
+				//TODO: error
+				return;
+			}
+		}
+
 		rtc::scoped_refptr<webrtc::AudioTrackInterface> audio_track;
 		rtc::scoped_refptr<webrtc::VideoTrackInterface> video_track;
 
 		std::string uuid;
 
-		JSValue& audio_constaints = constraints["audio"];
-		JSValue& video_constaints = constraints["video"];
+		const JSValue& audio_constaints = constraints["audio"];
+		const JSValue& video_constaints = constraints["video"];
 
 		//deviceId
 		//	A ConstrainDOMString object specifying a device ID or an array of device IDs which are acceptable and /or required.
@@ -230,8 +263,10 @@ namespace winrt::WebRTCModule
 		}
 
 		local_streams_[uuid] = media_stream;
-
 		success_callback(media_stream->id(), tracks);
+		return;
+	} ));
+
 	}
 
 
@@ -299,8 +334,8 @@ namespace winrt::WebRTCModule
 
 		local_streams_.erase(id);
 
-		std::for_each(pc_observers_.begin(), pc_observers_.end(), [media_stream](rtc::scoped_refptr<PeerConnectionObserver> ob) {
-			ob->RemoveStream(media_stream);
+		std::for_each(pc_observers_.begin(), pc_observers_.end(), [media_stream](auto ob) {
+			ob.second->RemoveStream(media_stream);
 			});
 
 		media_stream->Release();
@@ -324,7 +359,7 @@ namespace winrt::WebRTCModule
 			if (track->enabled() != enabled) {
 				track->set_enabled(enabled);
 				if (track->kind() == "video") {
-					rtc::scoped_refptr<webrtc::VideoTrackInterface> video_track = std::move(track);
+					webrtc::VideoTrackInterface* video_track = dynamic_cast<webrtc::VideoTrackInterface*>(track.get());
 					if (CapturerTrackSource* source = dynamic_cast<CapturerTrackSource*>(video_track->GetSource())) {
 						enabled ? source->StartCapturer() : source->StopCapturer();
 					}
@@ -346,13 +381,13 @@ namespace winrt::WebRTCModule
 
 	void(WebRTCModule::peerConnectionSetConfiguration)(webrtc::PeerConnectionInterface::RTCConfiguration configuration,
 		int id) noexcept {
-		if (auto pc = getPeerConnection()) {
+		if (auto pc = getPeerConnection(id)) {
 			pc->SetConfiguration(configuration);
 		}
 	}
 
 	void(WebRTCModule::peerConnectionAddStream)(std::string stream_id, int id) noexcept {
-		if (auto pc = getPeerConnection()) {
+		if (auto pc = getPeerConnection(id)) {
 			if (auto media_stream = local_streams_[stream_id]) {
 				pc->AddStream(media_stream);
 			}
@@ -363,7 +398,7 @@ namespace winrt::WebRTCModule
 	}
 
 	void(WebRTCModule::peerConnectionRemoveStream)(std::string stream_id, int id) noexcept {
-		if (auto pc = getPeerConnection()) {
+		if (auto pc = getPeerConnection(id)) {
 			if (auto media_stream = local_streams_[stream_id]) {
 				pc->RemoveStream(media_stream);
 			}
@@ -376,12 +411,10 @@ namespace winrt::WebRTCModule
 	class SDPCallbackHelper :
 		public webrtc::CreateSessionDescriptionObserver,
 		public webrtc::SetSessionDescriptionObserver,
-		public webrtc::SetLocalDescriptionObserverInterface,
+		//public webrtc::SetLocalDescriptionObserverInterface,
 		public webrtc::SetRemoteDescriptionObserverInterface {
 		const std::function<void(bool, JSValue&)> callback_;
 	public:
-		SDPCallbackHelper(const std::function<void(bool, JSValue&)> callback) :callback_(callback) {
-		}
 		SDPCallbackHelper(const std::function<void(bool, JSValue&)> callback) :callback_(callback) {
 		}
 		void OnSuccess(webrtc::SessionDescriptionInterface* desc) override {
@@ -398,12 +431,9 @@ namespace winrt::WebRTCModule
 		void OnSuccess() override {
 			callback_(true, JSValue());
 		}
-		void OnFailure(webrtc::RTCError error)override {
-			callback_(false, JSValue{ error.message() });
-		}
-		void OnSetLocalDescriptionComplete(webrtc::RTCError error)override {
-			callback_(error.ok(), JSValue{ error.message() });
-		}
+		//void OnSetLocalDescriptionComplete(webrtc::RTCError error)override {
+		//	callback_(error.ok(), JSValue{ error.message() });
+		//}
 		void OnSetRemoteDescriptionComplete(webrtc::RTCError error)override {
 			callback_(error.ok(), JSValue{ error.message() });
 		}
@@ -426,25 +456,38 @@ namespace winrt::WebRTCModule
 
 	void(WebRTCModule::peerConnectionCreateOffer)(int id,
 		JSValueObject&& options,
-		const std::function<void(bool, JSValueObject&)> callback) noexcept {
+		const std::function<void(bool, JSValue&)> callback) noexcept {
 
-		if (auto pc = getPeerConnection())
-			pc->CreateOffer(new rtc::RefCountedObject<SDPCallbackHelper>(callback));
+		const webrtc::PeerConnectionInterface::RTCOfferAnswerOptions params(
+			options["offerToReceiveVideo"].AsBoolean(),
+			options["offerToReceiveAudio"].AsBoolean(),
+			options["voiceActivityDetection"].AsBoolean(),
+			options["iceRestart"].AsBoolean(),
+			options["useRtpMux"].AsBoolean());
+
+		if (auto pc = getPeerConnection(id))
+			pc->CreateOffer(new rtc::RefCountedObject<SDPCallbackHelper>(callback), params);
 	}
 
 	void(WebRTCModule::peerConnectionCreateAnswer)(int id,
 		JSValueObject&& options,
-		const std::function<void(bool, JSValueObject&)> callback) noexcept {
+		const std::function<void(bool, JSValue&)> callback) noexcept {
 
-		if (auto pc = getPeerConnection())
-			pc->CreateAnswer(new rtc::RefCountedObject<SDPCallbackHelper>(callback));
+		const webrtc::PeerConnectionInterface::RTCOfferAnswerOptions params(
+			options["offerToReceiveVideo"].AsBoolean(),
+			options["offerToReceiveAudio"].AsBoolean(),
+			options["voiceActivityDetection"].AsBoolean(),
+			options["iceRestart"].AsBoolean(),
+			options["useRtpMux"].AsBoolean());
+		if (auto pc = getPeerConnection(id))
+			pc->CreateAnswer(new rtc::RefCountedObject<SDPCallbackHelper>(callback), params);
 	}
 
 	void(WebRTCModule::peerConnectionSetLocalDescription)(JSValueObject&& sdp_map,
 		int id,
-		const std::function<void(bool, JSValueObject&)> callback) noexcept {
+		const std::function<void(bool, JSValue&)> callback) noexcept {
 
-		if (auto pc = getPeerConnection()) {
+		if (auto pc = getPeerConnection(id)) {
 			std::string type = sdp_map["type"].AsString();
 			std::string sdp = sdp_map["sdp"].AsString();
 			webrtc::SdpType sdp_type;
@@ -452,14 +495,14 @@ namespace winrt::WebRTCModule
 				sdp_type = sdp_type_opt.value();
 			}
 
-			pc->SetLocalDescription(webrtc::CreateSessionDescription(sdp_type, sdp), new rtc::RefCountedObject<SDPCallbackHelper>(callback));
+			pc->SetLocalDescription(new rtc::RefCountedObject<SDPCallbackHelper>(callback), webrtc::CreateSessionDescription(sdp_type, sdp).release());
 		}
 	}
 
 	void(WebRTCModule::peerConnectionSetRemoteDescription)(JSValueObject&& sdp_map,
 		int id,
-		const std::function<void(bool, JSValueObject&)> callback) noexcept {
-		if (auto pc = getPeerConnection()) {
+		const std::function<void(bool, JSValue&)> callback) noexcept {
+		if (auto pc = getPeerConnection(id)) {
 			std::string type = sdp_map["type"].AsString();
 			std::string sdp = sdp_map["sdp"].AsString();
 			webrtc::SdpType sdp_type;
@@ -476,7 +519,7 @@ namespace winrt::WebRTCModule
 		const std::function<void(bool)> callback) noexcept {
 		bool result = false;
 
-		if (auto pc = getPeerConnection()) {
+		if (auto pc = getPeerConnection(id)) {
 			webrtc::SdpParseError error;
 			auto candidate = webrtc::CreateIceCandidate(
 				candidate_map["sdpMid"].AsString(),
